@@ -545,8 +545,20 @@ def process_and_build_frame(source_image, args, use_html=False):
     processed_image = preprocess_image(prepared_image, args.brightness, args.contrast, args.gamma)
     
     if args.edges:
-        import PIL.ImageFilter
-        processed_image = processed_image.filter(PIL.ImageFilter.FIND_EDGES)
+        if cv2 is not None:
+            import numpy as np
+            # Convert to numpy array for OpenCV
+            cv_img = np.array(processed_image)
+            # Convert to grayscale for Canny
+            cv_gray = cv2.cvtColor(cv_img, cv2.COLOR_RGB2GRAY)
+            # Apply Canny edge detection
+            edges = cv2.Canny(cv_gray, 100, 200)
+            # Convert back to PIL Image
+            import PIL.Image
+            processed_image = PIL.Image.fromarray(edges).convert("RGB")
+        else:
+            import PIL.ImageFilter
+            processed_image = processed_image.filter(PIL.ImageFilter.FIND_EDGES)
 
     grayscale_image = processed_image.convert("L")
     
