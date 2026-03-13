@@ -31,6 +31,8 @@ python main.py <image_path> [options]
 - `--crop` / `-crop`: Choose `none`, `cover`, or `contain` resizing behavior.
 - `--output` / `-output`: Write the result to a file instead of stdout.
 - `--webcam` / `-webcam`: Read live feed from webcam and output as animated ASCII art.
+- `--virtual-webcam` / `-virtual-webcam`: Create a virtual camera device broadcasting the ASCII art to other apps.
+- `--virtual-cam-fps` / `-virtual-cam-fps`: Framerate limit for virtual camera (default: 20).
 
 ## Media Support
 
@@ -48,6 +50,21 @@ python main.py <image_path> [options]
 
 ### Interactive TUI
 
+
+
+## Virtual Webcam 🎥
+
+You can output the terminal ASCII art directly to a virtual webcam, allowing you to use it in OBS, Zoom, Discord, or Teams!
+
+```bash
+# Output webcam through the ASCII filter to a virtual camera
+python main.py --webcam --virtual-webcam --mode braille --color
+
+# Play a video filter to the virtual camera
+python main.py examples/video.mp4 --virtual-webcam --virtual-cam-fps 30 --mode blocks --color
+```
+
+*Note: You may need to install and load the `v4l2loopback` kernel module on Linux (e.g. `sudo modprobe v4l2loopback`) before the virtual camera device is recognized. OBS Studio on Windows/macOS usually handles this natively.*
 
 
 If you are running in Video File or Webcam stream mode, the program enables an interactive Text User Interface (TUI) overlay, allowing real-time edits without restarting:

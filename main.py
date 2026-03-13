@@ -18,6 +18,8 @@ try:
 except ImportError:
     cv2 = None
 
+import virtualcam
+
 
 CHARSET_PRESETS = {
     "standard": "@%#*+=-:. ",
@@ -78,6 +80,9 @@ def parse_args(argv):
     parser.add_argument("--flip", "-flip", choices=("horizontal", "vertical"), default=None, help="Flip image horizontally or vertically")
     parser.add_argument("--crop", "-crop", choices=("none", "cover", "contain"), default="none", help="Resize strategy when fitting the image")
     parser.add_argument("--webcam", "-webcam", action="store_true", help="Use webcam as input")
+    parser.add_argument("--virtual-webcam", "-virtual-webcam", action="store_true", help="Output standard terminal ANSI to a virtual webcam device")
+    parser.add_argument("--virtual-cam-fps", "-virtual-cam-fps", type=positive_int, default=20, help="Framerate for the virtual webcam")
+    parser.add_argument("--virtual-cam-width", "-virtual-cam-width", type=positive_int, default=160, help="Terminal characters width for the virtual camera (for a high-res stream)")
     parser.add_argument("--output", "-output", default=None, help="Write the result to a file")
 
     args, extras = parser.parse_known_args(filtered_argv)
@@ -577,6 +582,7 @@ def process_and_build_frame(source_image, args, use_html=False):
 
 def play_gif(image, args, use_html):
     sys.stdout.write("\033[2J")  # Clear screen once
+    vcam = virtualcam.VirtualWebcamManager(fps=args.virtual_cam_fps) if args.virtual_webcam else None
     try:
         while True:
             for frame in PIL.ImageSequence.Iterator(image):
@@ -590,11 +596,22 @@ def play_gif(image, args, use_html):
                 sys.stdout.write("\033[H" + output)
                 sys.stdout.flush()
                 
+                if vcam:
+                    import copy
+                    vcam_args = copy.copy(args)
+                    vcam_args.width = args.virtual_cam_width
+                    vcam_args.fit_terminal = False
+                    vcam_output = process_and_build_frame(bg, vcam_args, use_html=False)
+                    vcam.send_frame(vcam_output)
+                
                 duration = frame.info.get('duration', 100)
                 time.sleep((duration or 100) / 1000.0)
     except KeyboardInterrupt:
         # Terminate cleanly
         sys.stdout.write("\n")
+    finally:
+        if vcam:
+            vcam.close()
 
 
 import threading
@@ -731,6 +748,8 @@ def play_video_stream(args, source=0):
     if sys.stdin.isatty():
         tui.start()
         
+    vcam = virtualcam.VirtualWebcamManager(fps=args.virtual_cam_fps) if args.virtual_webcam else None
+        
     fps = cap.get(cv2.CAP_PROP_FPS)
     if fps <= 0 or fps > 120:
         fps = 30
@@ -752,6 +771,13 @@ def play_video_stream(args, source=0):
             sys.stdout.write("\033[H" + output + "\n" + status_line)
             sys.stdout.flush()
             
+            if vcam:
+                vcam_args = copy.copy(args)
+                vcam_args.width = args.virtual_cam_width
+                vcam_args.fit_terminal = False
+                vcam_output = process_and_build_frame(pil_img, vcam_args, use_html=False)
+                vcam.send_frame(vcam_output)
+            
             elapsed = time.time() - start_time
             sleep_time = frame_delay - elapsed
             if sleep_time > 0 and source != 0:
@@ -764,6 +790,8 @@ def play_video_stream(args, source=0):
         cap.release()
         if sys.stdin.isatty():
             tui.stop()
+        if vcam:
+            vcam.close()
 
 def main():
     args = parse_args(sys.argv[1:])
@@ -802,7 +830,24 @@ def main():
                 play_gif(source_image, args, use_html)
             else:
                 output = process_and_build_frame(source_image.copy(), args, use_html)
-                if args.output:
+                if args.virtual_webcam:
+                    sys.stdout.write(output + "\nPress Ctrl+C to stop virtual webcam...\n")
+                    sys.stdout.flush()
+                    vcam = virtualcam.VirtualWebcamManager(fps=args.virtual_cam_fps)
+                    import copy
+                    vcam_args = copy.copy(args)
+                    vcam_args.width = args.virtual_cam_width
+                    vcam_args.fit_terminal = False
+                    vcam_output = process_and_build_frame(source_image.copy(), vcam_args, use_html=False)
+                    try:
+                        while True:
+                            vcam.send_frame(vcam_output)
+                            time.sleep(1.0 / args.virtual_cam_fps)
+                    except KeyboardInterrupt:
+                        pass
+                    finally:
+                        vcam.close()
+                elif args.output:
                     with open(args.output, "w", encoding="utf-8") as output_file:
                         output_file.write(output)
                 else:
