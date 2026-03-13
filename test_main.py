@@ -108,3 +108,70 @@ def test_build_terminal_braille_art():
     pixels_white = bytes([255] * 8)
     art_white = main.build_terminal_braille_art(pixels_white, 1, 1, invert=False, use_color=False)
     assert art_white == "⠀\n"  # Empty braille char
+
+def test_parse_filters_arg():
+    assert main.parse_filters_arg("pixelate") == ["pixelate"]
+    assert main.parse_filters_arg("blur,sharpen, matrix ") == ["blur", "sharpen", "matrix"]
+    assert main.parse_filters_arg("invalid, emboss") == ["emboss"]
+    assert main.parse_filters_arg("") == []
+
+class DummyArgs:
+    def __init__(self):
+        self.mode = "ascii"
+        self.brightness = 1.0
+        self.contrast = 1.0
+        self.color = False
+        self.bg_color = False
+        self.invert = False
+        self.edges = False
+        self.dither = False
+        self.charset = "standard"
+        self.rotate = 0.0
+        self.flip = None
+        self.crop = "none"
+        self.crop = "none"
+        self.gamma = 1.0
+        self.filter = []
+
+def test_terminal_tui_filters():
+    args = DummyArgs()
+    main.HAS_TERMIOS = False
+    main.HAS_TERMIOS = False
+    tui = main.TerminalTUI(args)
+    
+    # Test setting a new filter
+    tui._handle_key("p")
+    assert args.filter == ["pixelate"]
+    tui._handle_key("p")
+    assert args.filter == ["matrix"]
+    
+    # Test pushing a new filter layer
+    tui._handle_key("P")
+    assert args.filter == ["matrix", "none"]
+    tui._handle_key("p")
+    assert args.filter == ["matrix", "pixelate"]
+    
+    # Test popping a filter layer
+    tui._handle_key("O")
+    assert args.filter == ["matrix"]
+    tui._handle_key("O")
+    assert args.filter == ["none"]
+
+
+def test_build_html_document():
+    art = "Hello\nWorld"
+    doc = main.build_html_document(art, "img")
+    assert "<html lang=" in doc
+    assert "Hello\nWorld" in doc
+
+def test_process_and_build_frame(tmp_path):
+    img = Image.new("RGB", (10, 10))
+    args = DummyArgs()
+    args.width = 5
+    args.height = 5
+    args.fit_terminal = False
+    args.aspect_ratio = 1.0
+    res = main.process_and_build_frame(img, args)
+    assert isinstance(res, str)
+    assert len(res) > 0
+
