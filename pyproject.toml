@@ -8,6 +8,7 @@ dependencies = [
     "opencv-python>=4.13.0.92",
     "pillow>=12.1.1",
     "pyvirtualcam>=0.15.0",
+    "rembg>=2.0.72",
 ]
 
 [dependency-groups]

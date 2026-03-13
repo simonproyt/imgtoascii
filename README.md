@@ -19,6 +19,7 @@ python main.py <image_path> [options]
 - `--aspect-ratio` / `-aspect-ratio`: Character height-to-width correction factor. Default: `0.5`.
 - `--invert` / `-invert`: Reverse the brightness-to-character mapping.
 - `--edges` / `-edges`: Apply edge-detection filter for line-art styles.
+- `--filter` / `-filter`: Apply video filters (`none`, `pixelate`, `matrix`, `bg-remove`, `blur`, `sharpen`, `emboss`).
 - `--charset` / `-charset`: Choose a preset: `standard`, `dense`, `simple`, or `classic`.
 - `--mode` / `-mode`: Choose `ascii` (default), `blocks`, or `braille` rendering.
 - `--html` / `-html`: Export the result as an HTML document.
@@ -32,25 +33,35 @@ python main.py <image_path> [options]
 - `--output` / `-output`: Write the result to a file instead of stdout.
 - `--webcam` / `-webcam`: Read live feed from webcam and output as animated ASCII art.
 - `--virtual-webcam` / `-virtual-webcam`: Create a virtual camera device broadcasting the ASCII art to other apps.
+- `--virtual-cam-width` / `-virtual-cam-width`: Character width for the high-res virtual camera stream (default: `160`).
 - `--virtual-cam-fps` / `-virtual-cam-fps`: Framerate limit for virtual camera (default: 20).
 
 ## Media Support
 
-
-
 - **URLs**: You can pass a direct URL to an image or GIF (e.g., `https://example.com/image.png`) as the `<image_path>` and it will be downloaded and processed automatically.
-
 - **Animated GIFs**: If an animated GIF is provided, the script will loop through the frames infinitely, printing each directly to the terminal.
-
 - **Video Files**: Pass any supported local video file (`.mp4`, `.mkv`, `.avi`, `.webm`) and it will natively stream to the terminal.
-
 - **Webcams**: Providing the `--webcam` flag bypasses all paths and hooks directly into `cv2.VideoCapture(0)`. Useful for interactive live ascii feeds.
-
-
 
 ### Interactive TUI
 
+If you are running in Video File or Webcam stream mode, the program enables an interactive Text User Interface (TUI) overlay, allowing real-time edits without restarting:
 
+- `TAB`: Cycle between `ascii`, `blocks`, and `braille` modes
+- `Up` / `Down` Arrow: Adjust image Brightness
+- `Left` / `Right` Arrow: Adjust image Contrast
+- `g` / `G` (`Shift+G`): Adjust Gamma correction up or down
+- `c`: Toggle Truecolor RGB mode
+- `b`: Toggle Background Color mode
+- `i`: Toggle Inverse rendering mode
+- `e`: Toggle Canny Edge Detection (Line Art) mode
+- `p`: Cycle through interactive visual Filters (`pixelate`, `matrix`, `bg-remove`, etc.)
+- `d`: Toggle Dithering mode
+- `s`: Cycle ASCII character sets (`standard`, `dense`, etc.)
+- `r`: Rotate video feed by 90 degrees
+- `f`: Cycle video flip mirroring (`horizontal`, `vertical`, `none`)
+
+Press `CTRL+C` to cleanly exit video, webcam, and looping modes.
 
 ## Virtual Webcam 🎥
 
@@ -64,29 +75,7 @@ python main.py --webcam --virtual-webcam --mode braille --color
 python main.py examples/video.mp4 --virtual-webcam --virtual-cam-fps 30 --mode blocks --color
 ```
 
-*Note: You may need to install and load the `v4l2loopback` kernel module on Linux (e.g. `sudo modprobe v4l2loopback`) before the virtual camera device is recognized. OBS Studio on Windows/macOS usually handles this natively.*
-
-
-If you are running in Video File or Webcam stream mode, the program enables an interactive Text User Interface (TUI) overlay, allowing real-time edits without restarting:
-
-- `TAB`: Cycle between `ascii`, `blocks`, and `braille` modes.
-
-- `Up` / `Down` Arrow: Adjust image Brightness
-
-- `Left` / `Right` Arrow: Adjust image Contrast
-
-- `c`: Toggle Truecolor RGB mode
-
-- `i`: Toggle Inverse rendering mode
-- `e`: Toggle Canny Edge Detection (Line Art) mode
-- `b`: Toggle Background Color mode
-- `d`: Toggle Dithering mode
-
-
-
-Press `CTRL+C` to cleanly exit video, webcam, and looping modes.
-
-
+*Note: You may need to install and load the `v4l2loopback` kernel module on Linux (e.g., `sudo modprobe v4l2loopback exclusive_caps=1 card_label="ASCII Camera"`) before the virtual camera device is recognized. OBS Studio on Windows/macOS usually handles this natively.*
 
 ## Examples
 
