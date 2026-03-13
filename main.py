@@ -530,6 +530,8 @@ def render_output(grayscale_image, rgb_image, width, height, args, use_html):
 
 
 def process_and_build_frame(source_image, args, use_html=False):
+    import copy
+    args = copy.copy(args)
     source_image = orient_image(source_image, args.rotate, args.flip)
     original_width, original_height = source_image.size
     width, height = resolve_size(
@@ -595,19 +597,148 @@ def play_gif(image, args, use_html):
         sys.stdout.write("\n")
 
 
-def play_webcam(args):
+import threading
+
+try:
+    import termios
+    import tty
+    import select
+    HAS_TERMIOS = True
+except ImportError:
+    HAS_TERMIOS = False
+
+class TerminalTUI:
+    def __init__(self, args):
+        self.args = args
+        self.modes = ["ascii", "blocks", "braille"]
+        if self.args.mode not in self.modes:
+            self.modes.append(self.args.mode)
+        self.running = True
+        if HAS_TERMIOS and os.name != 'nt':
+            self.old_settings = termios.tcgetattr(sys.stdin.fileno())
+
+    def start(self):
+        if os.name == 'nt':
+            self.thread = threading.Thread(target=self._windows_loop, daemon=True)
+        else:
+            self.thread = threading.Thread(target=self._unix_loop, daemon=True)
+        self.thread.start()
+
+    def stop(self):
+        self.running = False
+        if HAS_TERMIOS and os.name != 'nt':
+            termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, self.old_settings)
+
+    def _unix_loop(self):
+        if not HAS_TERMIOS: return
+        fd = sys.stdin.fileno()
+        tty.setcbreak(fd)
+        while self.running:
+            rlist, _, _ = select.select([sys.stdin], [], [], 0.1)
+            if rlist:
+                ch = sys.stdin.read(1)
+                if ch == '\x1b':
+                    rlist2, _, _ = select.select([sys.stdin], [], [], 0.05)
+                    if rlist2:
+                        ch2 = sys.stdin.read(1)
+                        if ch2 == '[':
+                            rlist3, _, _ = select.select([sys.stdin], [], [], 0.05)
+                            if rlist3:
+                                ch3 = sys.stdin.read(1)
+                                if ch3 == 'A': self._handle_key("UP")
+                                elif ch3 == 'B': self._handle_key("DOWN")
+                                elif ch3 == 'C': self._handle_key("RIGHT")
+                                elif ch3 == 'D': self._handle_key("LEFT")
+                elif ch == '\t': self._handle_key("TAB")
+                elif ch == 'c': self._handle_key("c")
+                elif ch == 'i': self._handle_key("i")
+                elif ch == 'e': self._handle_key("e")
+                elif ch == 'b': self._handle_key("b")
+                elif ch == 'd': self._handle_key("d")
+                elif ch == '\x03': # ctrl+c
+                    import _thread
+                    _thread.interrupt_main()
+                    break
+                else: self._handle_key(ch)
+
+    def _windows_loop(self):
+        import msvcrt
+        while self.running:
+            if msvcrt.kbhit():
+                ch = msvcrt.getch()
+                if ch in (b'\x00', b'\xe0'):
+                    ch2 = msvcrt.getch()
+                    if ch2 == b'H': self._handle_key("UP")
+                    elif ch2 == b'P': self._handle_key("DOWN")
+                    elif ch2 == b'M': self._handle_key("RIGHT")
+                    elif ch2 == b'K': self._handle_key("LEFT")
+                elif ch == b'\t': self._handle_key("TAB")
+                elif ch == b'c': self._handle_key("c")
+                elif ch == b'i': self._handle_key("i")
+                elif ch == b'e': self._handle_key("e")
+                elif ch == b'b': self._handle_key("b")
+                elif ch == b'd': self._handle_key("d")
+                elif ch == b'\x03':
+                    import _thread
+                    _thread.interrupt_main()
+                    break
+                else: self._handle_key(ch.decode('utf-8', 'ignore'))
+            else:
+                time.sleep(0.05)
+
+    def _handle_key(self, key):
+        step = 0.1
+        if key == "UP":
+            self.args.brightness += step
+        elif key == "DOWN":
+            self.args.brightness = max(0.0, self.args.brightness - step)
+        elif key == "RIGHT":
+            self.args.contrast += step
+        elif key == "LEFT":
+            self.args.contrast = max(0.0, self.args.contrast - step)
+        elif key == "TAB":
+            idx = self.modes.index(self.args.mode)
+            self.args.mode = self.modes[(idx + 1) % len(self.modes)]
+        elif key == "c":
+            self.args.color = not self.args.color
+        elif key == "i":
+            self.args.invert = not self.args.invert
+        elif key == "e":
+            self.args.edges = not self.args.edges
+        elif key == "b":
+            self.args.bg_color = not self.args.bg_color
+            if self.args.bg_color:
+                self.args.color = True
+        elif key == "d":
+            self.args.dither = not self.args.dither
+
+    def get_status_line(self):
+        return f"\033[0m\033[K[TUI] Mode(TAB):{self.args.mode.upper()} | Bri(\u2191\u2193):{self.args.brightness:.1f} | Con(\u2190\u2192):{self.args.contrast:.1f} | Color(c):{self.args.color} | Bg(b):{self.args.bg_color} | Inv(i):{self.args.invert} | Edges(e):{self.args.edges} | Dither(d):{self.args.dither}"
+
+def play_video_stream(args, source=0):
     if cv2 is None:
-        print("Error: opencv-python is required for webcam mode. Install it with `pip config set global.index-url ...` or `uv add opencv-python`")
+        print("Error: opencv-python is required for video/webcam mode.")
         return
         
-    cap = cv2.VideoCapture(0)
+    cap = cv2.VideoCapture(source)
     if not cap.isOpened():
-        print("Error: Could not open webcam.")
+        print(f"Error: Could not open video source {source}.")
         return
         
     sys.stdout.write("\033[2J")  # Clear screen
+    
+    tui = TerminalTUI(args)
+    if sys.stdin.isatty():
+        tui.start()
+        
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    if fps <= 0 or fps > 120:
+        fps = 30
+    frame_delay = 1.0 / fps
+
     try:
         while True:
+            start_time = time.time()
             ret, frame = cap.read()
             if not ret:
                 break
@@ -616,20 +747,29 @@ def play_webcam(args):
             pil_img = PIL.Image.fromarray(frame_rgb)
             
             output = process_and_build_frame(pil_img, args, use_html=False)
+            status_line = tui.get_status_line() if sys.stdin.isatty() else ""
             
-            sys.stdout.write("\033[H" + output)
+            sys.stdout.write("\033[H" + output + "\n" + status_line)
             sys.stdout.flush()
+            
+            elapsed = time.time() - start_time
+            sleep_time = frame_delay - elapsed
+            if sleep_time > 0 and source != 0:
+                time.sleep(sleep_time)
+                
     except KeyboardInterrupt:
-        sys.stdout.write("\n")
+        pass
     finally:
+        sys.stdout.write("\n\033[0m")
         cap.release()
-
+        if sys.stdin.isatty():
+            tui.stop()
 
 def main():
     args = parse_args(sys.argv[1:])
     
     if args.webcam:
-        play_webcam(args)
+        play_video_stream(args, source=0)
         return
 
     image_path = args.image_path
@@ -646,6 +786,13 @@ def main():
         if not os.path.isfile(image_path):
             print(f"Error: File '{image_path}' does not exist.")
             return
+            
+        image_ext = image_path.lower().split('.')[-1]
+        video_exts = {'mp4', 'avi', 'mkv', 'mov', 'webm'}
+        if image_ext in video_exts:
+            play_video_stream(args, source=image_path)
+            return
+            
         image_file = image_path
 
     try:

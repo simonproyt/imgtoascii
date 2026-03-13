@@ -34,11 +34,42 @@ python main.py <image_path> [options]
 
 ## Media Support
 
+
+
 - **URLs**: You can pass a direct URL to an image or GIF (e.g., `https://example.com/image.png`) as the `<image_path>` and it will be downloaded and processed automatically.
+
 - **Animated GIFs**: If an animated GIF is provided, the script will loop through the frames infinitely, printing each directly to the terminal.
+
+- **Video Files**: Pass any supported local video file (`.mp4`, `.mkv`, `.avi`, `.webm`) and it will natively stream to the terminal.
+
 - **Webcams**: Providing the `--webcam` flag bypasses all paths and hooks directly into `cv2.VideoCapture(0)`. Useful for interactive live ascii feeds.
 
-Press `CTRL+C` to cleanly exit video and looping modes.
+
+
+### Interactive TUI
+
+
+
+If you are running in Video File or Webcam stream mode, the program enables an interactive Text User Interface (TUI) overlay, allowing real-time edits without restarting:
+
+- `TAB`: Cycle between `ascii`, `blocks`, and `braille` modes.
+
+- `Up` / `Down` Arrow: Adjust image Brightness
+
+- `Left` / `Right` Arrow: Adjust image Contrast
+
+- `c`: Toggle Truecolor RGB mode
+
+- `i`: Toggle Inverse rendering mode
+- `e`: Toggle Canny Edge Detection (Line Art) mode
+- `b`: Toggle Background Color mode
+- `d`: Toggle Dithering mode
+
+
+
+Press `CTRL+C` to cleanly exit video, webcam, and looping modes.
+
+
 
 ## Examples
 
