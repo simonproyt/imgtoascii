@@ -9,3 +9,6 @@ wheels/
 # Virtual environments
 .venv
 examples/
+out_*
+logs/
+out.txt

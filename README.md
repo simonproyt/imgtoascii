@@ -14,11 +14,13 @@ python main.py <image_path> [options]
 - `--height` / `-height`: Set the output height in characters.
 - `width=<n>` / `height=<n>`: Alternative width and height syntax.
 - `--color` / `-color`: Render ANSI truecolor ASCII output.
+- `--bg-color` / `-bg-color`: Render colors to the terminal background (implies `--color`).
 - `--fit-terminal` / `-fit-terminal`: Scale the output to fit the current terminal.
 - `--aspect-ratio` / `-aspect-ratio`: Character height-to-width correction factor. Default: `0.5`.
 - `--invert` / `-invert`: Reverse the brightness-to-character mapping.
+- `--edges` / `-edges`: Apply edge-detection filter for line-art styles.
 - `--charset` / `-charset`: Choose a preset: `standard`, `dense`, `simple`, or `classic`.
-- `--mode` / `-mode`: Choose `ascii` or `blocks` rendering.
+- `--mode` / `-mode`: Choose `ascii` (default), `blocks`, or `braille` rendering.
 - `--html` / `-html`: Export the result as an HTML document.
 - `--brightness` / `-brightness`: Adjust brightness. Default: `1.0`.
 - `--contrast` / `-contrast`: Adjust contrast. Default: `1.0`.

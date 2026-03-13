@@ -62,11 +62,13 @@ def parse_args(argv):
     parser.add_argument("--width", "-width", type=positive_int, default=None, help="Output width in characters")
     parser.add_argument("--height", "-height", type=positive_int, default=None, help="Output height in characters")
     parser.add_argument("--color", "-color", action="store_true", help="Render ANSI colored ASCII output")
+    parser.add_argument("--bg-color", "-bg-color", action="store_true", help="Render colors to the terminal background")
     parser.add_argument("--fit-terminal", "-fit-terminal", action="store_true", help="Fit output to the current terminal size")
     parser.add_argument("--aspect-ratio", "-aspect-ratio", type=positive_float, default=0.5, help="Character height-to-width correction factor")
     parser.add_argument("--invert", "-invert", action="store_true", help="Invert the brightness mapping")
+    parser.add_argument("--edges", "-edges", action="store_true", help="Apply edge detection filter")
     parser.add_argument("--charset", "-charset", choices=sorted(CHARSET_PRESETS), default="standard", help="ASCII character set preset")
-    parser.add_argument("--mode", "-mode", choices=("ascii", "blocks"), default="ascii", help="Rendering mode")
+    parser.add_argument("--mode", "-mode", choices=("ascii", "blocks", "braille"), default="ascii", help="Rendering mode")
     parser.add_argument("--html", "-html", action="store_true", help="Render the output as an HTML document")
     parser.add_argument("--brightness", "-brightness", type=positive_float, default=1.0, help="Brightness multiplier")
     parser.add_argument("--contrast", "-contrast", type=positive_float, default=1.0, help="Contrast multiplier")
@@ -93,6 +95,10 @@ def parse_args(argv):
             args.height = positive_int(token.split("=", 1)[1])
         else:
             parser.error(f"Unrecognized argument: {token}")
+
+    if args.bg_color:
+        args.color = True
+
     return args
 
 
@@ -129,10 +135,12 @@ def detect_html_output(args):
     return False
 
 
-def render_height_for_mode(height, mode):
+def render_size_for_mode(width, height, mode):
     if mode == "blocks":
-        return height * 2
-    return height
+        return width, height * 2
+    if mode == "braille":
+        return width * 2, height * 4
+    return width, height
 
 
 def resize_image(image, target_size, crop_mode):
@@ -217,11 +225,17 @@ def get_block_char(top_pixel, bottom_pixel, invert):
     return " "
 
 
-def build_terminal_ascii_art(grayscale_bytes, width, ascii_chars, use_color=False, color_bytes=b""):
+def build_terminal_ascii_art(grayscale_bytes, width, ascii_chars, use_color=False, use_bg_color=False, color_bytes=b""):
     ascii_art = []
     for pixel_index, pixel in enumerate(grayscale_bytes):
         ascii_char = get_ascii_char(pixel, ascii_chars)
-        if use_color:
+        if use_bg_color and use_color:
+            color_offset = pixel_index * 3
+            red = color_bytes[color_offset]
+            green = color_bytes[color_offset + 1]
+            blue = color_bytes[color_offset + 2]
+            ascii_art.append(f"\x1b[48;2;{red};{green};{blue}m \x1b[0m")
+        elif use_color:
             color_offset = pixel_index * 3
             red = color_bytes[color_offset]
             green = color_bytes[color_offset + 1]
@@ -231,17 +245,23 @@ def build_terminal_ascii_art(grayscale_bytes, width, ascii_chars, use_color=Fals
             ascii_art.append(ascii_char)
 
         if (pixel_index + 1) % width == 0:
-            if use_color:
+            if use_color and not use_bg_color:
                 ascii_art.append("\x1b[0m")
             ascii_art.append("\n")
     return "".join(ascii_art)
 
 
-def build_html_ascii_art(grayscale_bytes, width, ascii_chars, use_color=False, color_bytes=b""):
+def build_html_ascii_art(grayscale_bytes, width, ascii_chars, use_color=False, use_bg_color=False, color_bytes=b""):
     ascii_art = ["<pre class=\"ascii-art\">\n"]
     for pixel_index, pixel in enumerate(grayscale_bytes):
         ascii_char = html.escape(get_ascii_char(pixel, ascii_chars))
-        if use_color:
+        if use_bg_color and use_color:
+            color_offset = pixel_index * 3
+            red = color_bytes[color_offset]
+            green = color_bytes[color_offset + 1]
+            blue = color_bytes[color_offset + 2]
+            ascii_art.append(f"<span style=\"background-color: rgb({red}, {green}, {blue}); color: transparent;\">{ascii_char}</span>")
+        elif use_color:
             color_offset = pixel_index * 3
             red = color_bytes[color_offset]
             green = color_bytes[color_offset + 1]
@@ -323,6 +343,135 @@ def build_html_block_art(grayscale_bytes, width, height, invert, use_color=False
     return "".join(ascii_art)
 
 
+def build_terminal_braille_art(grayscale_bytes, width, height, invert, use_color=False, color_bytes=b""):
+    ascii_art = []
+    source_width = width * 2
+    source_height = height * 4
+    
+    dot_map = [
+        [0x01, 0x08],
+        [0x02, 0x10],
+        [0x04, 0x20],
+        [0x40, 0x80]
+    ]
+
+    for row in range(height):
+        for col in range(width):
+            braille_val = 0
+            base_y = row * 4
+            base_x = col * 2
+            
+            r_sum, g_sum, b_sum, color_count = 0, 0, 0, 0
+            
+            for dy in range(4):
+                y = base_y + dy
+                for dx in range(2):
+                    x = base_x + dx
+                    
+                    if y < source_height and x < source_width:
+                        idx = y * source_width + x
+                        pixel_val = grayscale_bytes[idx]
+                        
+                        is_active = pixel_val < 128
+                        if invert:
+                            is_active = not is_active
+                        
+                        if is_active:
+                            braille_val |= dot_map[dy][dx]
+                            if use_color:
+                                r_sum += color_bytes[idx*3]
+                                g_sum += color_bytes[idx*3+1]
+                                b_sum += color_bytes[idx*3+2]
+                                color_count += 1
+            
+            char = chr(0x2800 + braille_val)
+            
+            if use_color:
+                if color_count > 0:
+                    r = r_sum // color_count
+                    g = g_sum // color_count
+                    b = b_sum // color_count
+                else:
+                    idx = (base_y * source_width + base_x) * 3
+                    if idx + 2 < len(color_bytes):
+                        r, g, b = color_bytes[idx], color_bytes[idx+1], color_bytes[idx+2]
+                    else:
+                        r, g, b = 255, 255, 255
+                
+                ascii_art.append(f"\x1b[38;2;{r};{g};{b}m{char}")
+            else:
+                ascii_art.append(char)
+                
+        if use_color:
+            ascii_art.append("\x1b[0m")
+        ascii_art.append("\n")
+        
+    return "".join(ascii_art)
+
+def build_html_braille_art(grayscale_bytes, width, height, invert, use_color=False, color_bytes=b""):
+    ascii_art = ["<pre class=\"ascii-art\">\n"]
+    source_width = width * 2
+    source_height = height * 4
+    
+    dot_map = [
+        [0x01, 0x08],
+        [0x02, 0x10],
+        [0x04, 0x20],
+        [0x40, 0x80]
+    ]
+
+    for row in range(height):
+        for col in range(width):
+            braille_val = 0
+            base_y = row * 4
+            base_x = col * 2
+            
+            r_sum, g_sum, b_sum, color_count = 0, 0, 0, 0
+            
+            for dy in range(4):
+                y = base_y + dy
+                for dx in range(2):
+                    x = base_x + dx
+                    
+                    if y < source_height and x < source_width:
+                        idx = y * source_width + x
+                        pixel_val = grayscale_bytes[idx]
+                        
+                        is_active = pixel_val < 128
+                        if invert:
+                            is_active = not is_active
+                        
+                        if is_active:
+                            braille_val |= dot_map[dy][dx]
+                            if use_color:
+                                r_sum += color_bytes[idx*3]
+                                g_sum += color_bytes[idx*3+1]
+                                b_sum += color_bytes[idx*3+2]
+                                color_count += 1
+            
+            char = html.escape(chr(0x2800 + braille_val))
+            
+            if use_color:
+                if color_count > 0:
+                    r = r_sum // color_count
+                    g = g_sum // color_count
+                    b = b_sum // color_count
+                else:
+                    idx = (base_y * source_width + base_x) * 3
+                    if idx + 2 < len(color_bytes):
+                        r, g, b = color_bytes[idx], color_bytes[idx+1], color_bytes[idx+2]
+                    else:
+                        r, g, b = 255, 255, 255
+                
+                ascii_art.append(f"<span style=\"color: rgb({r}, {g}, {b});\">{char}</span>")
+            else:
+                ascii_art.append(char)
+                
+        ascii_art.append("\n")
+    ascii_art.append("</pre>")
+    return "".join(ascii_art)
+
+
 def build_html_document(content, title):
     escaped_title = html.escape(title)
     return (
@@ -352,11 +501,19 @@ def render_output(grayscale_image, rgb_image, width, height, args, use_html):
     grayscale_bytes = grayscale_image.tobytes()
     color_bytes = rgb_image.tobytes() if args.color else b""
 
+    if args.mode == "braille":
+        if use_html:
+            return build_html_document(
+                build_html_braille_art(grayscale_bytes, width, height, args.invert, args.color, color_bytes),
+                os.path.basename(args.image_path) if args.image_path else "webcam",
+            )
+        return build_terminal_braille_art(grayscale_bytes, width, height, args.invert, args.color, color_bytes)
+
     if args.mode == "blocks":
         if use_html:
             return build_html_document(
                 build_html_block_art(grayscale_bytes, width, height, args.invert, args.color, color_bytes),
-                os.path.basename(args.image_path),
+                os.path.basename(args.image_path) if args.image_path else "webcam",
             )
         return build_terminal_block_art(grayscale_bytes, width, height, args.invert, args.color, color_bytes)
 
@@ -366,10 +523,10 @@ def render_output(grayscale_image, rgb_image, width, height, args, use_html):
 
     if use_html:
         return build_html_document(
-            build_html_ascii_art(grayscale_bytes, width, ascii_chars, args.color, color_bytes),
-            os.path.basename(args.image_path),
+            build_html_ascii_art(grayscale_bytes, width, ascii_chars, args.color, args.bg_color, color_bytes),
+            os.path.basename(args.image_path) if args.image_path else "webcam",
         )
-    return build_terminal_ascii_art(grayscale_bytes, width, ascii_chars, args.color, color_bytes)
+    return build_terminal_ascii_art(grayscale_bytes, width, ascii_chars, args.color, args.bg_color, color_bytes)
 
 
 def process_and_build_frame(source_image, args, use_html=False):
@@ -383,10 +540,20 @@ def process_and_build_frame(source_image, args, use_html=False):
         args.fit_terminal,
         args.aspect_ratio,
     )
-    render_size = (width, render_height_for_mode(height, args.mode))
+    render_size = render_size_for_mode(width, height, args.mode)
     prepared_image = resize_image(source_image, render_size, args.crop)
     processed_image = preprocess_image(prepared_image, args.brightness, args.contrast, args.gamma)
+    
+    if args.edges:
+        import PIL.ImageFilter
+        processed_image = processed_image.filter(PIL.ImageFilter.FIND_EDGES)
+
     grayscale_image = processed_image.convert("L")
+    
+    if args.edges and not args.invert:
+        # Edges are white on black bg. Invert so edges are drawn with dense characters
+        grayscale_image = PIL.ImageOps.invert(grayscale_image)
+
     if args.dither:
         num_shades = len(CHARSET_PRESETS[args.charset]) if args.mode == "ascii" else len(BLOCK_SHADE_CHARS) * 2
         grayscale_image = apply_dithering(grayscale_image, num_shades)
