@@ -672,6 +672,11 @@ class TerminalTUI:
                 elif ch == 'e': self._handle_key("e")
                 elif ch == 'b': self._handle_key("b")
                 elif ch == 'd': self._handle_key("d")
+                elif ch == 's': self._handle_key("s")
+                elif ch == 'r': self._handle_key("r")
+                elif ch == 'f': self._handle_key("f")
+                elif ch == 'g': self._handle_key("g")
+                elif ch == 'G': self._handle_key("G")
                 elif ch == '\x03': # ctrl+c
                     import _thread
                     _thread.interrupt_main()
@@ -695,6 +700,11 @@ class TerminalTUI:
                 elif ch == b'e': self._handle_key("e")
                 elif ch == b'b': self._handle_key("b")
                 elif ch == b'd': self._handle_key("d")
+                elif ch == b's': self._handle_key("s")
+                elif ch == b'r': self._handle_key("r")
+                elif ch == b'f': self._handle_key("f")
+                elif ch == b'g': self._handle_key("g")
+                elif ch == b'G': self._handle_key("G")
                 elif ch == b'\x03':
                     import _thread
                     _thread.interrupt_main()
@@ -728,9 +738,23 @@ class TerminalTUI:
                 self.args.color = True
         elif key == "d":
             self.args.dither = not self.args.dither
+        elif key == "s":
+            charsets = sorted(CHARSET_PRESETS)
+            idx = charsets.index(self.args.charset)
+            self.args.charset = charsets[(idx + 1) % len(charsets)]
+        elif key == "r":
+            self.args.rotate = (self.args.rotate + 90.0) % 360.0
+        elif key == "f":
+            if self.args.flip is None: self.args.flip = "horizontal"
+            elif self.args.flip == "horizontal": self.args.flip = "vertical"
+            else: self.args.flip = None
+        elif key == "g":
+            self.args.gamma += 0.1
+        elif key == "G":
+            self.args.gamma = max(0.1, self.args.gamma - 0.1)
 
     def get_status_line(self):
-        return f"\033[0m\033[K[TUI] Mode(TAB):{self.args.mode.upper()} | Bri(\u2191\u2193):{self.args.brightness:.1f} | Con(\u2190\u2192):{self.args.contrast:.1f} | Color(c):{self.args.color} | Bg(b):{self.args.bg_color} | Inv(i):{self.args.invert} | Edges(e):{self.args.edges} | Dither(d):{self.args.dither}"
+        return f"\033[0m\033[K[TUI] Mode(TAB):{self.args.mode.upper()} | Bri(\u2191\u2193):{self.args.brightness:.1f} | Con(\u2190\u2192):{self.args.contrast:.1f} | Gam(g/G):{self.args.gamma:.1f}\n\033[K[TUI] Color(c):{self.args.color} | Bg(b):{self.args.bg_color} | Inv(i):{self.args.invert} | Edges(e):{self.args.edges} | Dith(d):{self.args.dither} | Set(s):{self.args.charset} | Rot(r):{self.args.rotate} | Flip(f):{self.args.flip}"
 
 def play_video_stream(args, source=0):
     if cv2 is None:
