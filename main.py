@@ -12,11 +12,14 @@ import PIL.Image
 import PIL.ImageEnhance
 import PIL.ImageOps
 import PIL.ImageSequence
+import PIL.ImageFilter
 
 try:
     import cv2
+    import numpy as np
 except ImportError:
     cv2 = None
+    np = None
 
 import virtualcam
 
@@ -49,6 +52,14 @@ def positive_float(value):
         raise argparse.ArgumentTypeError("must be greater than 0")
     return number
 
+def parse_filters_arg(val):
+    valid = ["pixelate", "matrix", "bg-remove", "blur", "sharpen", "emboss"]
+    res = []
+    for f in val.split(","):
+        f = f.strip().lower()
+        if f in valid:
+            res.append(f)
+    return res
 
 def parse_args(argv):
     filtered_argv = []
@@ -69,7 +80,7 @@ def parse_args(argv):
     parser.add_argument("--aspect-ratio", "-aspect-ratio", type=positive_float, default=0.5, help="Character height-to-width correction factor")
     parser.add_argument("--invert", "-invert", action="store_true", help="Invert the brightness mapping")
     parser.add_argument("--edges", "-edges", action="store_true", help="Apply edge detection filter")
-    parser.add_argument("--filter", "-filter", choices=("none", "pixelate", "matrix", "bg-remove", "blur", "sharpen", "emboss"), default="none", help="Apply visual filters")
+    parser.add_argument("--filter", "-filter", type=parse_filters_arg, default=[], help="Comma separated stacking visual filters (pixelate, matrix, bg-remove, blur, sharpen, emboss)")
     parser.add_argument("--charset", "-charset", choices=sorted(CHARSET_PRESETS), default="standard", help="ASCII character set preset")
     parser.add_argument("--mode", "-mode", choices=("ascii", "blocks", "braille"), default="ascii", help="Rendering mode")
     parser.add_argument("--html", "-html", action="store_true", help="Render the output as an HTML document")
@@ -552,50 +563,42 @@ def process_and_build_frame(source_image, args, use_html=False):
     prepared_image = resize_image(source_image, render_size, args.crop)
     processed_image = preprocess_image(prepared_image, args.brightness, args.contrast, args.gamma)
     
-    if args.filter == "blur":
-        import PIL.ImageFilter
-        processed_image = processed_image.filter(PIL.ImageFilter.BLUR)
-    elif args.filter == "sharpen":
-        import PIL.ImageFilter
-        processed_image = processed_image.filter(PIL.ImageFilter.SHARPEN)
-    elif args.filter == "emboss":
-        import PIL.ImageFilter
-        processed_image = processed_image.filter(PIL.ImageFilter.EMBOSS)
-    elif args.filter == "pixelate":
-        pw, ph = max(1, processed_image.width // 10), max(1, processed_image.height // 10)
-        temp = processed_image.resize((pw, ph), PIL.Image.Resampling.NEAREST)
-        processed_image = temp.resize((processed_image.width, processed_image.height), PIL.Image.Resampling.NEAREST)
-    elif args.filter == "matrix":
-        if cv2 is not None:
-            import numpy as np
-            arr = np.array(processed_image).astype(np.float32)
-            # Matrix green tint: mostly green channel, minimal red/blue.
-            r, g, b = arr[:,:,0], arr[:,:,1], arr[:,:,2]
-            intensity = (r * 0.2126 + g * 0.7152 + b * 0.0722)
-            arr[:,:,0] = 0.0  # R
-            arr[:,:,1] = np.clip(intensity * 1.5, 0, 255)  # G
-            arr[:,:,2] = 0.0  # B
-            processed_image = PIL.Image.fromarray(arr.astype(np.uint8))
-        args.color = True # Force color for matrix effect
-    elif args.filter == "bg-remove":
-        if cv2 is not None:
-            import numpy as np
-            if not hasattr(args, '_bg_subtractor') or args._bg_subtractor is None:
-                args._bg_subtractor = cv2.createBackgroundSubtractorMOG2(history=500, varThreshold=50, detectShadows=False)
-            
-            arr = np.array(processed_image)
-            fg_mask = args._bg_subtractor.apply(arr)
-            # Clean up the mask
-            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-            fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, kernel)
-            
-            # Apply green screen / black out background
-            arr[fg_mask == 0] = [0, 0, 0]
-            processed_image = PIL.Image.fromarray(arr)
+    for f in (args.filter if hasattr(args, 'filter') and isinstance(args.filter, list) else []):
+        if f == "blur":
+            processed_image = processed_image.filter(PIL.ImageFilter.BLUR)
+        elif f == "sharpen":
+            processed_image = processed_image.filter(PIL.ImageFilter.SHARPEN)
+        elif f == "emboss":
+            processed_image = processed_image.filter(PIL.ImageFilter.EMBOSS)
+        elif f == "pixelate":
+            pw, ph = max(1, processed_image.width // 10), max(1, processed_image.height // 10)
+            temp = processed_image.resize((pw, ph), PIL.Image.Resampling.NEAREST)
+            processed_image = temp.resize((processed_image.width, processed_image.height), PIL.Image.Resampling.NEAREST)
+        elif f == "matrix":
+            if cv2 is not None and np is not None:
+                arr = np.array(processed_image).astype(np.float32)
+                r, g, b = arr[:,:,0], arr[:,:,1], arr[:,:,2]
+                intensity = (r * 0.2126 + g * 0.7152 + b * 0.0722)
+                arr[:,:,0] = 0.0
+                arr[:,:,1] = np.clip(intensity * 1.5, 0, 255)
+                arr[:,:,2] = 0.0
+                processed_image = PIL.Image.fromarray(arr.astype(np.uint8))
+            args.color = True
+        elif f == "bg-remove":
+            if cv2 is not None and np is not None:
+                if not hasattr(args, '_bg_subtractor') or args._bg_subtractor is None:
+                    args._bg_subtractor = cv2.createBackgroundSubtractorMOG2(history=500, varThreshold=50, detectShadows=False)
+                
+                arr = np.array(processed_image)
+                fg_mask = args._bg_subtractor.apply(arr)
+                kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+                fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, kernel)
+                
+                arr[fg_mask == 0] = [0, 0, 0]
+                processed_image = PIL.Image.fromarray(arr)
 
     if args.edges:
-        if cv2 is not None:
-            import numpy as np
+        if cv2 is not None and np is not None:
             # Convert to numpy array for OpenCV
             cv_img = np.array(processed_image)
             # Convert to grayscale for Canny
@@ -603,10 +606,8 @@ def process_and_build_frame(source_image, args, use_html=False):
             # Apply Canny edge detection
             edges = cv2.Canny(cv_gray, 100, 200)
             # Convert back to PIL Image
-            import PIL.Image
             processed_image = PIL.Image.fromarray(edges).convert("RGB")
         else:
-            import PIL.ImageFilter
             processed_image = processed_image.filter(PIL.ImageFilter.FIND_EDGES)
 
     grayscale_image = processed_image.convert("L")
@@ -798,11 +799,24 @@ class TerminalTUI:
             self.args.gamma = max(0.1, self.args.gamma - 0.1)
         elif key == "p":
             filters = ["none", "pixelate", "matrix", "bg-remove", "blur", "sharpen", "emboss"]
-            idx = filters.index(self.args.filter)
-            self.args.filter = filters[(idx + 1) % len(filters)]
+            current = self.args.filter[-1] if self.args.filter else "none"
+            idx = filters.index(current) if current in filters else 0
+            new_filter = filters[(idx + 1) % len(filters)]
+            if not self.args.filter:
+                self.args.filter = [new_filter]
+            else:
+                self.args.filter[-1] = new_filter
+        elif key == "P": # Shift+P adds a new filter layer
+            self.args.filter.append("none")
+        elif key == "O": # Shift+O pops the last filter layer
+            if len(self.args.filter) > 1:
+                self.args.filter.pop()
+            elif len(self.args.filter) == 1:
+                self.args.filter = ["none"]
 
     def get_status_line(self):
-        return f"\033[0m\033[K[TUI] Mode(TAB):{self.args.mode.upper()} | Bri(\u2191\u2193):{self.args.brightness:.1f} | Con(\u2190\u2192):{self.args.contrast:.1f} | Gam(g/G):{self.args.gamma:.1f} | Filter(p):{self.args.filter}\n\033[K[TUI] Color(c):{self.args.color} | Bg(b):{self.args.bg_color} | Inv(i):{self.args.invert} | Edges(e):{self.args.edges} | Dith(d):{self.args.dither} | Set(s):{self.args.charset} | Rot(r):{self.args.rotate} | Flip(f):{self.args.flip}"
+        filters_str = ",".join(self.args.filter) if self.args.filter and self.args.filter != ["none"] else "none"
+        return f"\033[0m\033[K[TUI] Mode(TAB):{self.args.mode.upper()} | Bri(\u2191\u2193):{self.args.brightness:.1f} | Con(\u2190\u2192):{self.args.contrast:.1f} | Gam(g/G):{self.args.gamma:.1f} | Filter(p/P/O):{filters_str}\n\033[K[TUI] Color(c):{self.args.color} | Bg(b):{self.args.bg_color} | Inv(i):{self.args.invert} | Edges(e):{self.args.edges} | Dith(d):{self.args.dither} | Set(s):{self.args.charset} | Rot(r):{self.args.rotate} | Flip(f):{self.args.flip}"
 
 def play_video_stream(args, source=0):
     if cv2 is None:
