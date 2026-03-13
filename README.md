@@ -23,8 +23,20 @@ python main.py <image_path> [options]
 - `--brightness` / `-brightness`: Adjust brightness. Default: `1.0`.
 - `--contrast` / `-contrast`: Adjust contrast. Default: `1.0`.
 - `--gamma` / `-gamma`: Adjust gamma. Default: `1.0`.
+- `--dither` / `-dither`: Apply Floyd-Steinberg dithering for smoother gradients.
+- `--rotate` / `-rotate`: Rotate image by degrees. Default: `0.0`.
+- `--flip` / `-flip`: Flip image `horizontal` or `vertical`.
 - `--crop` / `-crop`: Choose `none`, `cover`, or `contain` resizing behavior.
 - `--output` / `-output`: Write the result to a file instead of stdout.
+- `--webcam` / `-webcam`: Read live feed from webcam and output as animated ASCII art.
+
+## Media Support
+
+- **URLs**: You can pass a direct URL to an image or GIF (e.g., `https://example.com/image.png`) as the `<image_path>` and it will be downloaded and processed automatically.
+- **Animated GIFs**: If an animated GIF is provided, the script will loop through the frames infinitely, printing each directly to the terminal.
+- **Webcams**: Providing the `--webcam` flag bypasses all paths and hooks directly into `cv2.VideoCapture(0)`. Useful for interactive live ascii feeds.
+
+Press `CTRL+C` to cleanly exit video and looping modes.
 
 ## Examples
 
@@ -36,5 +48,6 @@ python main.py examples/img1.png width=80 --output out.txt
 python main.py examples/img1.png --mode blocks --color
 python main.py examples/img1.png --html --color --output out.html
 python main.py examples/img1.png --brightness 1.15 --contrast 1.25 --gamma 0.9
+python main.py examples/img1.png --width 120 --dither --rotate 90 --flip horizontal
 python main.py examples/img1.png --width 120 --height 40 --crop cover
 ```

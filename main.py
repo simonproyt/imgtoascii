@@ -1,12 +1,22 @@
 import argparse
 import html
+import io
 import os
 import shutil
 import sys
+import time
+import urllib.request
+from urllib.error import URLError
 
 import PIL.Image
 import PIL.ImageEnhance
 import PIL.ImageOps
+import PIL.ImageSequence
+
+try:
+    import cv2
+except ImportError:
+    cv2 = None
 
 
 CHARSET_PRESETS = {
@@ -39,8 +49,16 @@ def positive_float(value):
 
 
 def parse_args(argv):
-    parser = argparse.ArgumentParser(description="Convert an image to ASCII art")
-    parser.add_argument("image_path", help="Path to the image file")
+    filtered_argv = []
+    extras_pre = []
+    for arg in argv:
+        if arg.startswith("width=") or arg.startswith("height="):
+            extras_pre.append(arg)
+        else:
+            filtered_argv.append(arg)
+
+    parser = argparse.ArgumentParser(description="Convert an image or webcam feed to ASCII art")
+    parser.add_argument("image_path", nargs="?", default=None, help="Path or URL to the image file")
     parser.add_argument("--width", "-width", type=positive_int, default=None, help="Output width in characters")
     parser.add_argument("--height", "-height", type=positive_int, default=None, help="Output height in characters")
     parser.add_argument("--color", "-color", action="store_true", help="Render ANSI colored ASCII output")
@@ -53,11 +71,18 @@ def parse_args(argv):
     parser.add_argument("--brightness", "-brightness", type=positive_float, default=1.0, help="Brightness multiplier")
     parser.add_argument("--contrast", "-contrast", type=positive_float, default=1.0, help="Contrast multiplier")
     parser.add_argument("--gamma", "-gamma", type=positive_float, default=1.0, help="Gamma correction factor")
+    parser.add_argument("--dither", "-dither", action="store_true", help="Apply Floyd-Steinberg dithering")
+    parser.add_argument("--rotate", "-rotate", type=float, default=0.0, help="Rotate image by degrees")
+    parser.add_argument("--flip", "-flip", choices=("horizontal", "vertical"), default=None, help="Flip image horizontally or vertically")
     parser.add_argument("--crop", "-crop", choices=("none", "cover", "contain"), default="none", help="Resize strategy when fitting the image")
+    parser.add_argument("--webcam", "-webcam", action="store_true", help="Use webcam as input")
     parser.add_argument("--output", "-output", default=None, help="Write the result to a file")
 
-    args, extras = parser.parse_known_args(argv)
-    for token in extras:
+    args, extras = parser.parse_known_args(filtered_argv)
+    if not args.image_path and not args.webcam:
+        parser.error("Must provide an image_path or use --webcam")
+
+    for token in extras + extras_pre:
         if token.startswith("width="):
             if args.width is not None:
                 parser.error("Width was provided more than once")
@@ -131,6 +156,28 @@ def adjust_gamma(image, gamma):
         return image
     lookup = [round(((value / 255) ** (1 / gamma)) * 255) for value in range(256)]
     return image.point(lookup * len(image.getbands()))
+
+
+def orient_image(image, rotate, flip):
+    if rotate != 0.0:
+        image = image.rotate(rotate, expand=True)
+    if flip == "horizontal":
+        image = PIL.ImageOps.mirror(image)
+    elif flip == "vertical":
+        image = PIL.ImageOps.flip(image)
+    return image
+
+
+def apply_dithering(grayscale_image, num_shades):
+    pal_img = PIL.Image.new("P", (1, 1))
+    palette = []
+    for i in range(num_shades):
+        val = int(i * 255 / max(1, num_shades - 1))
+        palette.extend([val, val, val])
+    palette.extend([0] * (768 - len(palette)))
+    pal_img.putpalette(palette)
+    # Convert requires RGB for quantize with palette
+    return grayscale_image.convert("RGB").quantize(palette=pal_img, dither=1).convert("L")
 
 
 def preprocess_image(image, brightness, contrast, gamma):
@@ -325,36 +372,115 @@ def render_output(grayscale_image, rgb_image, width, height, args, use_html):
     return build_terminal_ascii_art(grayscale_bytes, width, ascii_chars, args.color, color_bytes)
 
 
+def process_and_build_frame(source_image, args, use_html=False):
+    source_image = orient_image(source_image, args.rotate, args.flip)
+    original_width, original_height = source_image.size
+    width, height = resolve_size(
+        original_width,
+        original_height,
+        args.width,
+        args.height,
+        args.fit_terminal,
+        args.aspect_ratio,
+    )
+    render_size = (width, render_height_for_mode(height, args.mode))
+    prepared_image = resize_image(source_image, render_size, args.crop)
+    processed_image = preprocess_image(prepared_image, args.brightness, args.contrast, args.gamma)
+    grayscale_image = processed_image.convert("L")
+    if args.dither:
+        num_shades = len(CHARSET_PRESETS[args.charset]) if args.mode == "ascii" else len(BLOCK_SHADE_CHARS) * 2
+        grayscale_image = apply_dithering(grayscale_image, num_shades)
+
+    return render_output(grayscale_image, processed_image, width, height, args, use_html)
+
+
+def play_gif(image, args, use_html):
+    sys.stdout.write("\033[2J")  # Clear screen once
+    try:
+        while True:
+            for frame in PIL.ImageSequence.Iterator(image):
+                frame = frame.convert("RGBA")
+                # Paste onto black background to fix transparent frames
+                bg = PIL.Image.new("RGB", frame.size, (0, 0, 0))
+                bg.paste(frame, mask=frame.split()[3])
+                
+                output = process_and_build_frame(bg, args, use_html)
+                
+                sys.stdout.write("\033[H" + output)
+                sys.stdout.flush()
+                
+                duration = frame.info.get('duration', 100)
+                time.sleep((duration or 100) / 1000.0)
+    except KeyboardInterrupt:
+        # Terminate cleanly
+        sys.stdout.write("\n")
+
+
+def play_webcam(args):
+    if cv2 is None:
+        print("Error: opencv-python is required for webcam mode. Install it with `pip config set global.index-url ...` or `uv add opencv-python`")
+        return
+        
+    cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        print("Error: Could not open webcam.")
+        return
+        
+    sys.stdout.write("\033[2J")  # Clear screen
+    try:
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            pil_img = PIL.Image.fromarray(frame_rgb)
+            
+            output = process_and_build_frame(pil_img, args, use_html=False)
+            
+            sys.stdout.write("\033[H" + output)
+            sys.stdout.flush()
+    except KeyboardInterrupt:
+        sys.stdout.write("\n")
+    finally:
+        cap.release()
+
+
 def main():
     args = parse_args(sys.argv[1:])
-    image_path = args.image_path
-    if not os.path.isfile(image_path):
-        print(f"Error: File '{image_path}' does not exist.")
+    
+    if args.webcam:
+        play_webcam(args)
         return
+
+    image_path = args.image_path
+    
+    if image_path.startswith("http://") or image_path.startswith("https://"):
+        req = urllib.request.Request(image_path, headers={'User-Agent': 'Mozilla/5.0'})
+        try:
+            response = urllib.request.urlopen(req)
+            image_file = io.BytesIO(response.read())
+        except URLError as e:
+            print(f"Error fetching URL: {e}")
+            return
+    else:
+        if not os.path.isfile(image_path):
+            print(f"Error: File '{image_path}' does not exist.")
+            return
+        image_file = image_path
 
     try:
         use_html = detect_html_output(args)
-        with PIL.Image.open(image_path) as source_image:
-            original_width, original_height = source_image.size
-            width, height = resolve_size(
-                original_width,
-                original_height,
-                args.width,
-                args.height,
-                args.fit_terminal,
-                args.aspect_ratio,
-            )
-            render_size = (width, render_height_for_mode(height, args.mode))
-            prepared_image = resize_image(source_image, render_size, args.crop)
-            processed_image = preprocess_image(prepared_image, args.brightness, args.contrast, args.gamma)
-            grayscale_image = processed_image.convert("L")
-
-        output = render_output(grayscale_image, processed_image, width, height, args, use_html)
-        if args.output:
-            with open(args.output, "w", encoding="utf-8") as output_file:
-                output_file.write(output)
-        else:
-            sys.stdout.write(output)
+        with PIL.Image.open(image_file) as source_image:
+            if getattr(source_image, "is_animated", False) and not use_html and not args.output:
+                play_gif(source_image, args, use_html)
+            else:
+                output = process_and_build_frame(source_image.copy(), args, use_html)
+                if args.output:
+                    with open(args.output, "w", encoding="utf-8") as output_file:
+                        output_file.write(output)
+                else:
+                    sys.stdout.write(output)
 
     except Exception as e:
         print(f"Error: {e}")
