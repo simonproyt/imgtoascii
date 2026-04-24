@@ -1,12 +1,44 @@
 # imgtoascii
 
-Convert images into ASCII art in the terminal or write the result to a file.
+Convert images, GIFs, videos, and live webcam feeds into ASCII art — right in your terminal.
+
+## Motivation
+
+Text terminals are everywhere, yet most tools treat them as plain-text boxes. **imgtoascii** pushes what a terminal can display: it maps any pixel source — still images, animated GIFs, video files, or a live webcam — to dense ASCII or Unicode characters with optional ANSI truecolor, background coloring, braille patterns, and block shading.
+
+The project is intentionally self-contained and dependency-light, making it easy to drop onto any Python 3.13+ machine and immediately turn a photo into art, pipe ASCII frames into a file, or broadcast yourself through a virtual camera as a living ASCII mosaic on Zoom or OBS.
+
+## Quick Start
+
+**Requirements:** Python ≥ 3.13 and [uv](https://github.com/astral-sh/uv) (or plain `pip`).
+
+```bash
+# Clone the repository
+git clone https://github.com/simonproyt/imgtoascii.git
+cd imgtoascii
+
+# Install dependencies with uv
+uv sync
+
+# Convert a bundled example image and print it to the terminal
+uv run python main.py examples/img1.png --fit-terminal
+
+# Add color
+uv run python main.py examples/img1.png --fit-terminal --color
+
+# Convert a URL
+uv run python main.py https://example.com/photo.jpg --width 120 --color
+```
+
+> **Tip:** Omit `uv run` if you activated the virtual environment manually (`source .venv/bin/activate`).
 
 ## Usage
 
 ```bash
 python main.py <image_path> [options]
 ```
+
+`<image_path>` can be a local file, a direct image/GIF URL, or a video file. Pass `--webcam` to read from your default camera instead.
 
 ## Options
 
@@ -90,3 +122,25 @@ python main.py examples/img1.png --brightness 1.15 --contrast 1.25 --gamma 0.9
 python main.py examples/img1.png --width 120 --dither --rotate 90 --flip horizontal
 python main.py examples/img1.png --width 120 --height 40 --crop cover
 ```
+
+## Contributing
+
+Contributions are welcome! Here is how to get started:
+
+1. **Fork** the repository on GitHub and clone your fork locally.
+2. **Create a branch** for your change:
+   ```bash
+   git checkout -b feature/my-improvement
+   ```
+3. **Install development dependencies:**
+   ```bash
+   uv sync --group dev
+   ```
+4. **Make your changes** and add or update tests in `test_main.py` as needed.
+5. **Run the test suite** to make sure nothing is broken:
+   ```bash
+   uv run pytest
+   ```
+6. **Commit and push** your branch, then open a Pull Request against `main`.
+
+Please keep pull requests focused on a single feature or fix. For large changes, open an issue first to discuss the approach. Bug reports, feature ideas, and documentation improvements are all equally appreciated.
